@@ -1,0 +1,38 @@
+name: Synthetic macOS browser probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos27-synthetic-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: github.event.repository.private == false && github.event.repository.visibility == 'public'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Verify public repository and retrieve exact public commit
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          VISIBILITY: ${{ github.event.repository.visibility }}
+          SERVER: ${{ github.server_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VISIBILITY" == public && "$SERVER" == https://github.com ]]
+          [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          git init source
+          git -C source remote add origin "https://github.com/$REPO.git"
+          git -C source fetch --depth=1 origin "$SHA"
+          git -C source checkout --detach FETCH_HEAD
+          [[ "$(git -C source rev-parse HEAD)" == "$SHA" ]]
+      - name: Enable Safari remote automation on ephemeral runner
+        shell: bash
+        run: |
+          python3 -c 'import subprocess; r=subprocess.run(["/usr/bin/safaridriver", "--enable"], timeout=20, capture_output=True, text=True); print("safaridriver --enable exit:", r.returncode)' || echo 'Enable attempt timed out or failed; probe will report actual status.'
+      - name: Run synthetic fixture and real-browser probes
+        shell: bash
+        run: python3 source/probe.py
