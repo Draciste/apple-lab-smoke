@@ -14,16 +14,17 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
 
 DOWNLOAD = b'synthetic download: English and Czech UTF-8\n'
 TEXT = 'Hello world | Příliš žluťoučký kůň | 漢字'
 results = {}
 
-def request(url, data=None, method=None):
+def request(url, data=None, method=None, timeout=12):
     body = None if data is None else json.dumps(data, ensure_ascii=False).encode('utf-8')
     req = urllib.request.Request(url, body, {'Content-Type': 'application/json'}, method=method)
-    with urllib.request.urlopen(req, timeout=12) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         return json.load(response)
 
 def port():
@@ -36,8 +37,12 @@ def browser(name, command, capabilities, url, download_dir=None):
     process = None
     session = None
     base = 'http://127.0.0.1:' + str(number)
+    phase = 'launch driver'
+    driver_log = tempfile.TemporaryFile(mode='w+b')
     try:
-        process = subprocess.Popen(command + ['--port', str(number)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        port_args = ['--port=' + str(number)] if name == 'Chrome' else ['--port', str(number)]
+        process = subprocess.Popen(command + port_args, stdout=driver_log, stderr=subprocess.STDOUT)
+        phase = 'wait for driver'
         for _ in range(80):
             if process.poll() is not None:
                 raise RuntimeError('driver exited before accepting connections')
@@ -48,16 +53,20 @@ def browser(name, command, capabilities, url, download_dir=None):
                 time.sleep(.25)
         else:
             raise RuntimeError('driver did not become ready')
-        response = request(base + '/session', {'capabilities': {'alwaysMatch': capabilities}})
+        phase = 'create session'
+        response = request(base + '/session', {'capabilities': {'alwaysMatch': capabilities}}, timeout=90)
         value = response['value']
         session = value['sessionId']
         caps = value.get('capabilities', {})
-        request(base + '/session/' + session + '/url', {'url': url})
+        phase = 'navigate fixture'
+        request(base + '/session/' + session + '/url', {'url': url}, timeout=45)
+        phase = 'read rendered fixture'
         value = request(base + '/session/' + session + '/execute/sync', {'script': 'return document.querySelector("#fixture").textContent', 'args': []})['value']
         if value != TEXT:
             raise AssertionError('rendered fixture text mismatch')
         download = {'status': 'unverified', 'detail': 'Safari download destination is not configured by this probe'}
         if download_dir is not None:
+            phase = 'click and verify download'
             download = {'status': 'fail', 'detail': 'download did not complete within 15 seconds'}
             element = request(base + '/session/' + session + '/element', {'using': 'css selector', 'value': '#download'})['value']
             element_id = element['element-6066-11e4-a52e-4f735466cecf']
@@ -68,9 +77,16 @@ def browser(name, command, capabilities, url, download_dir=None):
                     download = {'status': 'pass', 'bytes': len(DOWNLOAD)}
                     break
                 time.sleep(.25)
-        return {'status': 'pass' if download['status'] != 'fail' else 'fail', 'render': 'pass', 'download': download, 'browserName': caps.get('browserName'), 'browserVersion': caps.get('browserVersion')}
+        if download['status'] == 'fail':
+            raise RuntimeError(download['detail'])
+        return {'status': 'pass', 'render': 'pass', 'download': download, 'browserName': caps.get('browserName'), 'browserVersion': caps.get('browserVersion')}
     except Exception as exc:
-        return {'status': 'fail', 'detail': str(exc)[:350]}
+        driver_log.flush()
+        driver_log.seek(0, 2)
+        size = driver_log.tell()
+        driver_log.seek(max(0, size - 6000))
+        tail = driver_log.read().decode('utf-8', errors='replace')
+        return {'status': 'fail', 'phase': phase, 'detail': str(exc)[:350], 'driver_exit': process.poll() if process else None, 'driver_log_tail': tail}
     finally:
         if session:
             try:
@@ -84,6 +100,7 @@ def browser(name, command, capabilities, url, download_dir=None):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+        driver_log.close()
 
 def chrome_cdp_version():
     executable = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
@@ -109,6 +126,76 @@ def chrome_cdp_version():
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+
+def opera_probe(url, temporary):
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_SERVER_URL') != 'https://github.com':
+        return {'status': 'unverified', 'detail': 'Opera acquisition only runs on the GitHub-hosted disposable job'}
+    work = Path(temporary) / 'opera'
+    work.mkdir()
+    image, mount, app = work / 'opera.dmg', work / 'mount', work / 'Opera.app'
+    mount.mkdir()
+    mounted = False
+    process = None
+    phase = 'download official installer'
+    try:
+        subprocess.run(['/usr/bin/curl', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--max-time', '240', '--max-filesize', '800000000', '--output', str(image), 'https://download.opera.com/download/get/?partner=www&opsys=MacOS&download_url='], check=True, timeout=250, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        phase = 'mount read-only'
+        subprocess.run(['/usr/bin/hdiutil', 'attach', '-readonly', '-nobrowse', '-noautoopen', '-mountpoint', str(mount), str(image)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        mounted = True
+        original = mount / 'Opera.app'
+        phase = 'verify Opera signature and notarization'
+        requirement = 'anchor apple generic and identifier "com.operasoftware.Opera" and certificate leaf[subject.OU] = "A2P9LX4JPN"'
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(original)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(['/usr/sbin/spctl', '--assess', '--type', 'execute', str(original)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        phase = 'copy verified app'
+        subprocess.run(['/usr/bin/ditto', str(original), str(app)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(app)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        phase = 'launch isolated Opera CDP'
+        number = port()
+        profile = work / 'profile'
+        binary = app / 'Contents' / 'MacOS' / 'Opera'
+        log = open(work / 'opera.log', 'w+b')
+        try:
+            process = subprocess.Popen([str(binary), '--headless', '--no-first-run', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=' + str(number), '--user-data-dir=' + str(profile), 'about:blank'], stdout=log, stderr=subprocess.STDOUT)
+            base = 'http://127.0.0.1:' + str(number)
+            for _ in range(120):
+                if process.poll() is not None:
+                    raise RuntimeError('Opera exited before CDP endpoint became ready')
+                try:
+                    version = request(base + '/json/version', timeout=1)
+                    break
+                except (OSError, ValueError):
+                    time.sleep(.25)
+            else:
+                raise TimeoutError('Opera CDP endpoint did not become ready')
+            phase = 'render synthetic page over CDP'
+            target = request(base + '/json/new?' + urllib.parse.quote(url, safe=''), method='PUT')
+            js = r"""const ws = new WebSocket(process.argv[1]); let n = 0; const timer = setTimeout(() => { console.error('CDP timeout'); process.exit(2); }, 20000); ws.onopen = () => ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:'JSON.stringify({text:document.querySelector(\"#fixture\")?.textContent,ua:navigator.userAgent})',returnByValue:true}})); ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id !== 1) return; try { const x = JSON.parse(m.result.result.value); if (x.text && x.ua) { clearTimeout(timer); console.log(JSON.stringify(x)); ws.close(); return; } } catch (_) {} if (++n < 40) setTimeout(() => ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:'JSON.stringify({text:document.querySelector(\"#fixture\")?.textContent,ua:navigator.userAgent})',returnByValue:true}})),250); };"""
+            node = subprocess.run(['node', '-e', js, target['webSocketDebuggerUrl']], check=True, capture_output=True, text=True, timeout=25)
+            actual = json.loads(node.stdout)
+            if actual.get('text') != TEXT or 'OPR/' not in actual.get('ua', ''):
+                raise ValueError('Opera brand or rendered text mismatch')
+            return {'status': 'pass', 'render': 'pass', 'signature': 'Apple trust, Opera bundle and team verified', 'browser': version.get('Browser'), 'download': 'unverified'}
+        finally:
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            log.close()
+    except Exception as exc:
+        detail = str(exc)[:300]
+        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+            detail += ': ' + exc.stderr.decode('utf-8', errors='replace')[-1000:]
+        return {'status': 'unverified', 'phase': phase, 'detail': detail}
+    finally:
+        if mounted:
+            try:
+                subprocess.run(['/usr/bin/hdiutil', 'detach', str(mount)], timeout=30, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                print('Warning: could not detach temporary Opera image', file=sys.stderr)
 
 def safari_mcp():
     executable = '/usr/bin/safaridriver'
@@ -191,7 +278,7 @@ def main():
             firefox_download.mkdir()
             drivers = [
                 ('Safari', '/usr/bin/safaridriver', {'browserName': 'safari'}, None),
-                ('Firefox', shutil.which('geckodriver'), {'browserName': 'firefox', 'moz:firefoxOptions': {'prefs': {'browser.download.folderList': 2, 'browser.download.dir': str(firefox_download), 'browser.helperApps.neverAsk.saveToDisk': 'application/octet-stream', 'browser.download.useDownloadDir': True}}}, firefox_download),
+                ('Firefox', shutil.which('geckodriver'), {'browserName': 'firefox', 'moz:firefoxOptions': {'binary': '/Applications/Firefox.app/Contents/MacOS/firefox', 'prefs': {'browser.download.folderList': 2, 'browser.download.dir': str(firefox_download), 'browser.helperApps.neverAsk.saveToDisk': 'application/octet-stream', 'browser.download.useDownloadDir': True}}}, firefox_download),
                 ('Chrome', shutil.which('chromedriver') or str(Path(os.environ.get('CHROMEWEBDRIVER', '/nonexistent')) / 'chromedriver'), {'browserName': 'chrome', 'goog:chromeOptions': {'prefs': {'download.default_directory': str(chrome_download), 'download.prompt_for_download': False}}}, chrome_download),
             ]
             for name, executable, caps, download_dir in drivers:
@@ -199,14 +286,14 @@ def main():
                     results[name] = {'status': 'unverified', 'detail': 'driver not found'}
                 else:
                     results[name] = browser(name, [executable], caps, url, download_dir)
+            results['Opera'] = opera_probe(url, temporary)
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
     results['Safari_MCP'] = safari_mcp()
-    results['Opera'] = {'status': 'unverified', 'detail': 'No Opera acquisition or compatible driver configured; see README for official installation fallback'}
     results['chrome_cdp_version'] = chrome_cdp_version()
-    results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'attempted for Chrome and Firefox; Safari unverified', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'initialize and tools/list only', 'opera': 'unverified; see installation fallback', 'webkit': 'not a Safari substitute'}
+    results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'attempted for Chrome and Firefox; Safari unverified', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'initialize and tools/list only', 'opera': 'official signed app acquisition and CDP render attempt; download unverified', 'webkit': 'not a Safari substitute'}
     results['environment'] = {'system': platform.system(), 'release': platform.release(), 'machine': platform.machine(), 'image_os': os.environ.get('ImageOS'), 'image_version': os.environ.get('ImageVersion')}
     output = json.dumps(results, ensure_ascii=False, indent=2)
     print(output)
