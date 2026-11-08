@@ -157,11 +157,11 @@ def opera_probe(url, temporary):
         original = mount / 'Opera.app'
         phase = 'verify Opera signature and notarization'
         requirement = 'anchor apple generic and identifier "com.operasoftware.Opera" and certificate leaf[subject.OU] = "A2P9LX4JPN"'
-        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(original)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', '=' + requirement, str(original)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         subprocess.run(['/usr/sbin/spctl', '--assess', '--type', 'execute', str(original)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         phase = 'copy verified app'
         subprocess.run(['/usr/bin/ditto', str(original), str(app)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement, str(app)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', '=' + requirement, str(app)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         phase = 'launch isolated Opera CDP'
         number = port()
         profile = work / 'profile'
@@ -306,7 +306,7 @@ def main():
     results['Safari_MCP'] = safari_mcp()
     results['chrome_cdp_version'] = chrome_cdp_version()
     results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'attempted for Chrome and Firefox; Safari unverified', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'initialize and tools/list only', 'opera': 'official signed app acquisition and CDP render attempt; download unverified', 'webkit': 'not a Safari substitute'}
-    results['environment'] = {'system': platform.system(), 'release': platform.release(), 'machine': platform.machine(), 'image_os': os.environ.get('ImageOS'), 'image_version': os.environ.get('ImageVersion')}
+    results['environment'] = {'system': platform.system(), 'release': platform.release(), 'macos_version': platform.mac_ver()[0], 'machine': platform.machine(), 'image_os': os.environ.get('ImageOS'), 'image_version': os.environ.get('ImageVersion')}
     output = json.dumps(results, ensure_ascii=False, indent=2)
     print(output)
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
