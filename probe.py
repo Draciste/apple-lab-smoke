@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Small synthetic local-only browser fixture; no browser libraries required."""
 import http.server
+import hashlib
 import json
 import os
 import platform
@@ -138,7 +139,18 @@ def opera_probe(url, temporary):
     process = None
     phase = 'download official installer'
     try:
-        subprocess.run(['/usr/bin/curl', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--max-time', '240', '--max-filesize', '800000000', '--output', str(image), 'https://download.opera.com/download/get/?partner=www&opsys=MacOS&download_url='], check=True, timeout=250, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        opera_url = 'https://get.geo.opera.com/pub/opera/desktop/137.0.6036.63/mac/Opera_137.0.6036.63_Setup.dmg'
+        download = subprocess.run(['/usr/bin/curl', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--max-time', '240', '--max-filesize', '800000000', '--output', str(image), '--write-out', '%{content_type}', opera_url], check=True, timeout=250, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        content_type = download.stdout.decode('ascii', errors='replace').strip().split(';', 1)[0].lower()
+        if content_type not in ('application/octet-stream', 'application/x-apple-diskimage'):
+            raise ValueError('Unexpected installer Content-Type: ' + repr(content_type))
+        phase = 'verify pinned installer SHA-256'
+        digest = hashlib.sha256()
+        with image.open('rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                digest.update(chunk)
+        if digest.hexdigest() != '107729af53552633405ebf3536785fa7ade584e614064fc402c30d790f5de03a':
+            raise ValueError('Installer SHA-256 mismatch')
         phase = 'mount read-only'
         subprocess.run(['/usr/bin/hdiutil', 'attach', '-readonly', '-nobrowse', '-noautoopen', '-mountpoint', str(mount), str(image)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         mounted = True
@@ -301,7 +313,7 @@ def main():
     if summary:
         with open(summary, 'a', encoding='utf-8') as file:
             file.write('## Synthetic browser probe\n\n```json\n' + output + '\n```\n')
-    return 0 if all(results.get(name, {}).get('status') == 'pass' for name in ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome')) else 1
+    return 0 if all(results.get(name, {}).get('status') == 'pass' for name in ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome', 'Opera')) else 1
 
 if __name__ == '__main__':
     sys.exit(main())
