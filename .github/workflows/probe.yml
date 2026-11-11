@@ -1,6 +1,12 @@
 name: Synthetic macOS browser probe
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Probe scope
+        type: choice
+        options: [gaps, full]
+        default: gaps
 permissions:
   contents: read
 concurrency:
@@ -34,5 +40,14 @@ jobs:
         run: |
           python3 -c 'import subprocess; r=subprocess.run(["/usr/bin/safaridriver", "--enable"], timeout=20, capture_output=True, text=True); print("safaridriver --enable exit:", r.returncode)' || echo 'Enable attempt timed out or failed; probe will report actual status.'
       - name: Run synthetic fixture and real-browser probes
+        env:
+          PROBE_SCOPE: ${{ inputs.scope }}
         shell: bash
-        run: python3 source/probe.py
+        run: |
+          if [[ "$PROBE_SCOPE" == full ]]; then
+            python3 source/probe.py
+          elif [[ "$PROBE_SCOPE" == gaps ]]; then
+            python3 source/probe.py --gaps-only
+          else
+            echo 'Unknown probe scope' >&2; exit 2
+          fi

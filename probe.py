@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 import urllib.parse
+import uuid
 from pathlib import Path
 
 DOWNLOAD = b'synthetic download: English and Czech UTF-8\n'
@@ -33,7 +34,7 @@ def port():
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
 
-def browser(name, command, capabilities, url, download_dir=None):
+def browser(name, command, capabilities, url, download_dir=None, download_name="synthetic-fixture.bin"):
     number = port()
     process = None
     session = None
@@ -68,11 +69,11 @@ def browser(name, command, capabilities, url, download_dir=None):
         download = {'status': 'unverified', 'detail': 'Safari download destination is not configured by this probe'}
         if download_dir is not None:
             phase = 'click and verify download'
-            download = {'status': 'fail', 'detail': 'download did not complete within 15 seconds'}
+            download = {'status': 'unverified' if name == 'Safari' else 'fail', 'detail': 'download not observed at expected location within 15 seconds'}
             element = request(base + '/session/' + session + '/element', {'using': 'css selector', 'value': '#download'})['value']
             element_id = element['element-6066-11e4-a52e-4f735466cecf']
             request(base + '/session/' + session + '/element/' + element_id + '/click', {})
-            target = download_dir / 'synthetic-fixture.bin'
+            target = download_dir / download_name
             for _ in range(60):
                 if target.is_file() and target.read_bytes() == DOWNLOAD:
                     download = {'status': 'pass', 'bytes': len(DOWNLOAD)}
@@ -187,7 +188,15 @@ def opera_probe(url, temporary):
             actual = json.loads(node.stdout)
             if actual.get('text') != TEXT or 'OPR/' not in actual.get('ua', ''):
                 raise ValueError('Opera brand or rendered text mismatch')
-            return {'status': 'pass', 'render': 'pass', 'signature': 'Apple trust, Opera bundle and team verified', 'browser': version.get('Browser'), 'download': 'unverified'}
+            phase = 'verify synthetic Opera download over CDP'
+            download_dir = work / 'downloads'
+            download_dir.mkdir()
+            download_js = r"""const [browserURL,pageURL,dir,expectedURL]=process.argv.slice(1); let browser, page, guid; const timer=setTimeout(()=>{console.error('CDP download timeout');process.exit(2)},20000); function fail(x){console.error(x);process.exit(2)} browser=new WebSocket(browserURL); browser.onopen=()=>browser.send(JSON.stringify({id:1,method:'Browser.setDownloadBehavior',params:{behavior:'allow',downloadPath:dir,eventsEnabled:true}})); browser.onerror=()=>fail('browser websocket error'); browser.onmessage=e=>{let m=JSON.parse(e.data); if(m.id===1){if(m.error) return fail(JSON.stringify(m.error)); page=new WebSocket(pageURL);page.onerror=()=>fail('page websocket error'); page.onopen=()=>page.send(JSON.stringify({id:2,method:'Runtime.evaluate',params:{expression:'document.querySelector("#download").click()'}}));page.onmessage=e=>{let x=JSON.parse(e.data);if(x.id===2 && (x.error||x.result?.exceptionDetails)) fail(JSON.stringify(x));};} if(m.method==='Browser.downloadWillBegin' && m.params.url===expectedURL) guid=m.params.guid; if(m.method==='Browser.downloadProgress' && guid && m.params.guid===guid){if(m.params.state==='canceled') return fail('download canceled');if(m.params.state==='completed'){clearTimeout(timer); console.log(JSON.stringify({guid,state:m.params.state})); page.close();browser.close();}}};"""
+            node = subprocess.run(['node', '-e', download_js, version['webSocketDebuggerUrl'], target['webSocketDebuggerUrl'], str(download_dir), url.rsplit('/', 1)[0] + '/synthetic-fixture.bin'], check=True, capture_output=True, text=True, timeout=25)
+            event = json.loads(node.stdout)
+            if event.get('state') != 'completed' or (download_dir / 'synthetic-fixture.bin').read_bytes() != DOWNLOAD:
+                raise ValueError('Opera download event or bytes mismatch')
+            return {'status': 'pass', 'render': 'pass', 'signature': 'Apple trust, Opera bundle and team verified', 'browser': version.get('Browser'), 'download': {'status': 'pass', 'bytes': len(DOWNLOAD), 'evidence': 'CDP completion and exact file bytes'}}
         finally:
             if process and process.poll() is None:
                 process.terminate()
@@ -209,7 +218,7 @@ def opera_probe(url, temporary):
             except Exception:
                 print('Warning: could not detach temporary Opera image', file=sys.stderr)
 
-def safari_mcp():
+def safari_mcp(url):
     executable = '/usr/bin/safaridriver'
     if not Path(executable).is_file():
         return {'status': 'unverified', 'detail': 'safaridriver unavailable'}
@@ -240,7 +249,27 @@ def safari_mcp():
         tools = response(2).get('tools')
         if not isinstance(tools, list):
             raise ValueError('tools/list did not return a list')
-        return {'status': 'pass', 'protocol_version': init.get('protocolVersion'), 'server': init.get('serverInfo'), 'tool_count': len(tools), 'scope': 'initialize and tools/list only; no tool calls'}
+        catalog = [{'name': t.get('name'), 'inputSchema': t.get('inputSchema')} for t in tools if isinstance(t, dict)]
+        result = {'status': 'pass', 'protocol_version': init.get('protocolVersion'), 'server': init.get('serverInfo'), 'tool_count': len(tools), 'tools': catalog, 'call': {'status': 'unverified', 'detail': 'documented navigate_to_url schema is not directly usable'}}
+        candidates = [t for t in tools if isinstance(t, dict) and t.get('name') == 'navigate_to_url']
+        if (len(candidates) == 1 and os.environ.get('GITHUB_ACTIONS') == 'true' and
+            os.environ.get('GITHUB_SERVER_URL') == 'https://github.com'):
+            schema = candidates[0].get('inputSchema') or {}
+            props = schema.get('properties') or {}
+            if (schema.get('type') == 'object' and isinstance(props, dict) and
+                (props.get('url') or {}).get('type') == 'string' and
+                set(schema.get('required') or []).issubset({'url'})):
+                try:
+                    send({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call', 'params': {'name': 'navigate_to_url', 'arguments': {'url': url}}})
+                    called = response(3)
+                    serialized = json.dumps(called, ensure_ascii=False)
+                    if called.get('isError') or TEXT not in serialized:
+                        result['call'] = {'status': 'unverified', 'detail': 'tool returned an error or did not contain the expected fixture text'}
+                    else:
+                        result['call'] = {'status': 'pass', 'tool': 'navigate_to_url', 'evidence': 'fixture text returned'}
+                except Exception as exc:
+                    result['call'] = {'status': 'unverified', 'detail': str(exc)[:250] or type(exc).__name__}
+        return result
     except Exception as exc:
         return {'status': 'unverified', 'detail': str(exc)[:250] or type(exc).__name__}
     finally:
@@ -252,6 +281,9 @@ def safari_mcp():
             process.wait()
 
 def main():
+    gaps_only = '--gaps-only' in sys.argv[1:]
+    if any(arg != '--gaps-only' for arg in sys.argv[1:]):
+        raise SystemExit('usage: probe.py [--gaps-only]')
     with tempfile.TemporaryDirectory(prefix='synthetic-probe-') as temporary:
         folder = Path(temporary) / 'Příliš žluťoučký' / '漢字'
         folder.mkdir(parents=True)
@@ -262,16 +294,17 @@ def main():
         out = subprocess.run([sys.executable, '-c', code, str(file)], check=True, capture_output=True, text=True, encoding='utf-8', timeout=10, env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
         assert json.loads(out.stdout) == payload
         results['unicode_subprocess_json'] = {'status': 'pass', 'cases': ['English', 'Czech', 'Unicode path']}
+        safari_name = 'applelab-' + uuid.uuid4().hex + '.bin'
         html = '<!doctype html><meta charset="utf-8"><div id="fixture">' + TEXT + '</div><a id="download" href="/synthetic-fixture.bin">Download</a>'
         (folder / 'index.html').write_text(html, encoding='utf-8')
         class Handler(http.server.SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(folder), **kwargs)
             def do_GET(self):
-                if self.path == '/synthetic-fixture.bin':
+                if self.path in ('/synthetic-fixture.bin', '/' + safari_name):
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/octet-stream')
-                    self.send_header('Content-Disposition', 'attachment; filename="synthetic-fixture.bin"')
+                    self.send_header('Content-Disposition', 'attachment; filename="' + self.path[1:] + '"')
                     self.send_header('Content-Length', str(len(DOWNLOAD)))
                     self.end_headers()
                     self.wfile.write(DOWNLOAD)
@@ -293,19 +326,38 @@ def main():
                 ('Firefox', shutil.which('geckodriver'), {'browserName': 'firefox', 'moz:firefoxOptions': {'binary': '/Applications/Firefox.app/Contents/MacOS/firefox', 'prefs': {'browser.download.folderList': 2, 'browser.download.dir': str(firefox_download), 'browser.helperApps.neverAsk.saveToDisk': 'application/octet-stream', 'browser.download.useDownloadDir': True}}}, firefox_download),
                 ('Chrome', shutil.which('chromedriver') or str(Path(os.environ.get('CHROMEWEBDRIVER', '/nonexistent')) / 'chromedriver'), {'browserName': 'chrome', 'goog:chromeOptions': {'prefs': {'download.default_directory': str(chrome_download), 'download.prompt_for_download': False}}}, chrome_download),
             ]
+            if gaps_only:
+                drivers = drivers[:1]
             for name, executable, caps, download_dir in drivers:
                 if not executable or not Path(executable).is_file():
                     results[name] = {'status': 'unverified', 'detail': 'driver not found'}
                 else:
-                    results[name] = browser(name, [executable], caps, url, download_dir)
+                    if name == 'Safari' and os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_SERVER_URL') == 'https://github.com':
+                        safari_download = Path.home() / 'Downloads'
+                        # This random name belongs to this run; never replace an existing file.
+                        safari_target = safari_download / safari_name
+                        if safari_download.is_dir() and not safari_target.exists():
+                            safari_url = url + '?download=' + safari_name
+                            # The page uses this unique download link only for the Safari run.
+                            (folder / 'index.html').write_text(html.replace('/synthetic-fixture.bin', '/' + safari_name), encoding='utf-8')
+                            try:
+                                results[name] = browser(name, [executable], caps, safari_url, safari_download, safari_name)
+                            finally:
+                                safari_target.unlink(missing_ok=True)
+                                (folder / 'index.html').write_text(html, encoding='utf-8')
+                        else:
+                            results[name] = browser(name, [executable], caps, url)
+                    else:
+                        results[name] = browser(name, [executable], caps, url, download_dir)
             results['Opera'] = opera_probe(url, temporary)
+            results['Safari_MCP'] = safari_mcp(url)
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
-    results['Safari_MCP'] = safari_mcp()
-    results['chrome_cdp_version'] = chrome_cdp_version()
-    results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'attempted for Chrome and Firefox; Safari unverified', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'initialize and tools/list only', 'opera': 'official signed app acquisition and CDP render attempt; download unverified', 'webkit': 'not a Safari substitute'}
+    if not gaps_only:
+        results['chrome_cdp_version'] = chrome_cdp_version()
+    results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'Safari attempts unique file in disposable CI Downloads; Chrome and Firefox use temporary directories', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'tool schemas and conditional loopback navigate_to_url call', 'opera': 'official signed app acquisition, CDP render and download attempt', 'webkit': 'not a Safari substitute'}
     results['environment'] = {'system': platform.system(), 'release': platform.release(), 'macos_version': platform.mac_ver()[0], 'machine': platform.machine(), 'image_os': os.environ.get('ImageOS'), 'image_version': os.environ.get('ImageVersion')}
     output = json.dumps(results, ensure_ascii=False, indent=2)
     print(output)
@@ -313,7 +365,8 @@ def main():
     if summary:
         with open(summary, 'a', encoding='utf-8') as file:
             file.write('## Synthetic browser probe\n\n```json\n' + output + '\n```\n')
-    return 0 if all(results.get(name, {}).get('status') == 'pass' for name in ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome', 'Opera')) else 1
+    required = ('Safari', 'Opera') if gaps_only else ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome', 'Opera')
+    return 0 if all(results.get(name, {}).get('status') == 'pass' for name in required) else 1
 
 if __name__ == '__main__':
     sys.exit(main())
