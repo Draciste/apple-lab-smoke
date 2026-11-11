@@ -140,7 +140,7 @@ def opera_probe(url, temporary):
     process = None
     phase = 'download official installer'
     try:
-        opera_url = 'https://get.geo.opera.com/pub/opera/desktop/137.0.6036.63/mac/Opera_137.0.6036.63_Setup.dmg'
+        opera_url = 'https://get.geo.opera.com/pub/opera/desktop/140.0.6074.18/mac/Opera_140.0.6074.18_Setup.dmg'
         download = subprocess.run(['/usr/bin/curl', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--max-time', '240', '--max-filesize', '800000000', '--output', str(image), '--write-out', '%{content_type}', opera_url], check=True, timeout=250, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         content_type = download.stdout.decode('ascii', errors='replace').strip().split(';', 1)[0].lower()
         if content_type not in ('application/octet-stream', 'application/x-apple-diskimage'):
@@ -150,7 +150,7 @@ def opera_probe(url, temporary):
         with image.open('rb') as f:
             for chunk in iter(lambda: f.read(1024 * 1024), b''):
                 digest.update(chunk)
-        if digest.hexdigest() != '107729af53552633405ebf3536785fa7ade584e614064fc402c30d790f5de03a':
+        if digest.hexdigest() != 'bf2df952ce93b91f91b2b3bc41173a5a6de013225bc91ad54c70a70aff9db032':
             raise ValueError('Installer SHA-256 mismatch')
         phase = 'mount read-only'
         subprocess.run(['/usr/bin/hdiutil', 'attach', '-readonly', '-nobrowse', '-noautoopen', '-mountpoint', str(mount), str(image)], check=True, timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
