@@ -34,7 +34,7 @@ def port():
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
 
-def browser(name, command, capabilities, url, download_dir=None, download_name="synthetic-fixture.bin"):
+def browser(name, command, capabilities, url, download_dir=None, download_name="synthetic-fixture.bin", render_only=False):
     number = port()
     process = None
     session = None
@@ -66,6 +66,8 @@ def browser(name, command, capabilities, url, download_dir=None, download_name="
         value = request(base + '/session/' + session + '/execute/sync', {'script': 'return document.querySelector("#fixture").textContent', 'args': []})['value']
         if value != TEXT:
             raise AssertionError('rendered fixture text mismatch')
+        if render_only:
+            return {'status': 'pass', 'render': 'pass', 'browserName': caps.get('browserName'), 'browserVersion': caps.get('browserVersion')}
         download = {'status': 'unverified', 'detail': 'Safari download destination is not configured by this probe'}
         if download_dir is not None:
             phase = 'click and verify download'
@@ -129,7 +131,7 @@ def chrome_cdp_version():
                 process.kill()
                 process.wait()
 
-def opera_probe(url, temporary):
+def opera_probe(url, temporary, render_only=False):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_SERVER_URL') != 'https://github.com':
         return {'status': 'unverified', 'detail': 'Opera acquisition only runs on the GitHub-hosted disposable job'}
     work = Path(temporary) / 'opera'
@@ -188,6 +190,8 @@ def opera_probe(url, temporary):
             actual = json.loads(node.stdout)
             if actual.get('text') != TEXT or 'OPR/' not in actual.get('ua', ''):
                 raise ValueError('Opera brand or rendered text mismatch')
+            if render_only:
+                return {'status': 'pass', 'render': 'pass', 'signature': 'Apple trust, Opera bundle and team verified', 'browser': version.get('Browser')}
             phase = 'verify synthetic Opera download over CDP'
             download_dir = work / 'downloads'
             download_dir.mkdir()
@@ -217,6 +221,74 @@ def opera_probe(url, temporary):
                 subprocess.run(['/usr/bin/hdiutil', 'detach', str(mount)], timeout=30, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 print('Warning: could not detach temporary Opera image', file=sys.stderr)
+
+def edge_probe(url, temporary):
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_SERVER_URL') != 'https://github.com':
+        return {'status': 'unverified', 'detail': 'Edge acquisition only runs on the GitHub-hosted disposable job'}
+    work = Path(temporary) / 'edge'
+    work.mkdir()
+    pkg, expanded = work / 'edge.pkg', work / 'expanded'
+    phase = 'download pinned Microsoft package'
+    process = None
+    try:
+        package_url = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/03f15e1f-bb9b-485b-a3f6-2e99402cb9a0/MicrosoftEdge-157.0.4341.46.pkg'
+        subprocess.run(['/usr/bin/curl', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--max-time', '240', '--max-filesize', '600000000', '--output', str(pkg), package_url], check=True, timeout=250, capture_output=True)
+        phase = 'verify Microsoft published package hash'
+        digest = hashlib.sha256()
+        with pkg.open('rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                digest.update(chunk)
+        if digest.hexdigest() != '71c48e8f6b559c52744771606c8bce4c30e9fab71692c563fdfa69b2ef3c8d20':
+            raise ValueError('Microsoft package SHA-256 mismatch')
+        phase = 'extract package without installing or running scripts'
+        subprocess.run(['/usr/sbin/pkgutil', '--expand-full', str(pkg), str(expanded)], check=True, timeout=180, capture_output=True)
+        candidates = list(expanded.rglob('Microsoft Edge.app'))
+        if len(candidates) != 1:
+            raise ValueError('Expected exactly one Microsoft Edge.app in expanded package')
+        app = candidates[0]
+        binary = app / 'Contents' / 'MacOS' / 'Microsoft Edge'
+        phase = 'verify app signature, trust and ARM support'
+        requirement = 'anchor apple generic and identifier "com.microsoft.edgemac" and certificate leaf[subject.OU] = "UBF8T346G9"'
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', '=' + requirement, str(app)], check=True, timeout=90, capture_output=True)
+        subprocess.run(['/usr/sbin/spctl', '--assess', '--type', 'execute', str(app)], check=True, timeout=90, capture_output=True)
+        arch = subprocess.run(['/usr/bin/lipo', '-archs', str(binary)], check=True, timeout=20, capture_output=True, text=True).stdout.split()
+        if platform.machine() != 'arm64' or 'arm64' not in arch:
+            raise ValueError('Edge or runner lacks native arm64 support')
+        phase = 'launch isolated Edge CDP'
+        number = port()
+        process = subprocess.Popen([str(binary), '--headless', '--no-first-run', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=' + str(number), '--user-data-dir=' + str(work / 'profile'), 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        base = 'http://127.0.0.1:' + str(number)
+        for _ in range(120):
+            if process.poll() is not None:
+                raise RuntimeError('Edge exited before CDP endpoint became ready')
+            try:
+                version = request(base + '/json/version', timeout=1)
+                break
+            except (OSError, ValueError):
+                time.sleep(.25)
+        else:
+            raise TimeoutError('Edge CDP endpoint did not become ready')
+        phase = 'render synthetic page over CDP'
+        target = request(base + '/json/new?' + urllib.parse.quote(url, safe=''), method='PUT')
+        js = r"""const ws=new WebSocket(process.argv[1]); let n=0; const timer=setTimeout(()=>process.exit(2),20000); function ask(){ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:'JSON.stringify({text:document.querySelector("#fixture")?.textContent,ua:navigator.userAgent})',returnByValue:true}}))} ws.onopen=ask; ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id!==1)return;try{const x=JSON.parse(m.result.result.value);if(x.text&&x.ua){clearTimeout(timer);console.log(JSON.stringify(x));ws.close();return}}catch(_){} if(++n<40)setTimeout(ask,250)};"""
+        node = subprocess.run(['node', '-e', js, target['webSocketDebuggerUrl']], check=True, capture_output=True, text=True, timeout=25)
+        actual = json.loads(node.stdout)
+        if actual.get('text') != TEXT or 'Edg/' not in actual.get('ua', ''):
+            raise ValueError('Edge brand or rendered text mismatch')
+        return {'status': 'pass', 'render': 'pass', 'browser': version.get('Browser'), 'architecture': 'arm64', 'signature': 'Apple trust, Microsoft Edge bundle and team verified', 'package_version': '157.0.4341.46'}
+    except Exception as exc:
+        detail = str(exc)[:300]
+        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+            detail += ': ' + (exc.stderr.decode('utf-8', errors='replace') if isinstance(exc.stderr, bytes) else exc.stderr)[-1000:]
+        return {'status': 'unverified', 'phase': phase, 'detail': detail}
+    finally:
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 def safari_mcp(url):
     executable = '/usr/bin/safaridriver'
@@ -282,18 +354,20 @@ def safari_mcp(url):
 
 def main():
     gaps_only = '--gaps-only' in sys.argv[1:]
-    if any(arg != '--gaps-only' for arg in sys.argv[1:]):
-        raise SystemExit('usage: probe.py [--gaps-only]')
+    collection = '--collection-only' in sys.argv[1:]
+    if len(sys.argv) > 2 or any(arg not in ('--gaps-only', '--collection-only') for arg in sys.argv[1:]):
+        raise SystemExit('usage: probe.py [--gaps-only | --collection-only]')
     with tempfile.TemporaryDirectory(prefix='synthetic-probe-') as temporary:
         folder = Path(temporary) / 'Příliš žluťoučký' / '漢字'
         folder.mkdir(parents=True)
-        payload = {'en': 'Hello world', 'cs': 'Příliš žluťoučký kůň', 'unicode_path': str(folder.name)}
-        file = folder / 'příběh.json'
-        file.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
-        code = 'import json,sys; print(json.dumps(json.load(open(sys.argv[1],encoding="utf-8")),ensure_ascii=False))'
-        out = subprocess.run([sys.executable, '-c', code, str(file)], check=True, capture_output=True, text=True, encoding='utf-8', timeout=10, env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
-        assert json.loads(out.stdout) == payload
-        results['unicode_subprocess_json'] = {'status': 'pass', 'cases': ['English', 'Czech', 'Unicode path']}
+        if not collection:
+            payload = {'en': 'Hello world', 'cs': 'Příliš žluťoučký kůň', 'unicode_path': str(folder.name)}
+            file = folder / 'příběh.json'
+            file.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+            code = 'import json,sys; print(json.dumps(json.load(open(sys.argv[1],encoding="utf-8")),ensure_ascii=False))'
+            out = subprocess.run([sys.executable, '-c', code, str(file)], check=True, capture_output=True, text=True, encoding='utf-8', timeout=10, env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+            assert json.loads(out.stdout) == payload
+            results['unicode_subprocess_json'] = {'status': 'pass', 'cases': ['English', 'Czech', 'Unicode path']}
         safari_name = 'applelab-' + uuid.uuid4().hex + '.bin'
         html = '<!doctype html><meta charset="utf-8"><div id="fixture">' + TEXT + '</div><a id="download" href="/synthetic-fixture.bin">Download</a>'
         (folder / 'index.html').write_text(html, encoding='utf-8')
@@ -332,7 +406,9 @@ def main():
                 if not executable or not Path(executable).is_file():
                     results[name] = {'status': 'unverified', 'detail': 'driver not found'}
                 else:
-                    if name == 'Safari' and os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_SERVER_URL') == 'https://github.com':
+                    if collection:
+                        results[name] = browser(name, [executable], caps, url, render_only=True)
+                    elif name == 'Safari' and os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_SERVER_URL') == 'https://github.com':
                         safari_download = Path.home() / 'Downloads'
                         # This random name belongs to this run; never replace an existing file.
                         safari_target = safari_download / safari_name
@@ -349,15 +425,20 @@ def main():
                             results[name] = browser(name, [executable], caps, url)
                     else:
                         results[name] = browser(name, [executable], caps, url, download_dir)
-            results['Opera'] = opera_probe(url, temporary)
-            results['Safari_MCP'] = safari_mcp(url)
+            results['Opera'] = opera_probe(url, temporary, render_only=collection)
+            if collection:
+                results['Edge'] = edge_probe(url, temporary)
+            else:
+                results['Safari_MCP'] = safari_mcp(url)
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
-    if not gaps_only:
+    if not gaps_only and not collection:
         results['chrome_cdp_version'] = chrome_cdp_version()
     results['capabilities'] = {'protocol': 'W3C WebDriver over loopback HTTP; no Selenium client library', 'display': 'headed browser session attempted; no screen interaction or remote desktop', 'downloads': 'Safari attempts unique file in disposable CI Downloads; Chrome and Firefox use temporary directories', 'chrome_cdp': 'loopback version endpoint only', 'safari_mcp': 'tool schemas and conditional loopback navigate_to_url call', 'opera': 'official signed app acquisition, CDP render and download attempt', 'webkit': 'not a Safari substitute'}
+    if collection:
+        results['capabilities'] = {'protocol': 'WebDriver and CDP on loopback', 'collection': 'five browser synthetic DOM smokes only', 'edge': 'pinned Microsoft package, verified signed ARM app', 'webkit': 'not a Safari substitute'}
     results['environment'] = {'system': platform.system(), 'release': platform.release(), 'macos_version': platform.mac_ver()[0], 'machine': platform.machine(), 'image_os': os.environ.get('ImageOS'), 'image_version': os.environ.get('ImageVersion')}
     output = json.dumps(results, ensure_ascii=False, indent=2)
     print(output)
@@ -365,7 +446,7 @@ def main():
     if summary:
         with open(summary, 'a', encoding='utf-8') as file:
             file.write('## Synthetic browser probe\n\n```json\n' + output + '\n```\n')
-    required = ('Safari', 'Opera') if gaps_only else ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome', 'Opera')
+    required = ('Safari', 'Firefox', 'Chrome', 'Opera', 'Edge') if collection else (('Safari', 'Opera') if gaps_only else ('unicode_subprocess_json', 'Safari', 'Firefox', 'Chrome', 'Opera'))
     return 0 if all(results.get(name, {}).get('status') == 'pass' for name in required) else 1
 
 if __name__ == '__main__':

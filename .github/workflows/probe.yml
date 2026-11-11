@@ -5,7 +5,7 @@ on:
       scope:
         description: Probe scope
         type: choice
-        options: [gaps, full]
+        options: [gaps, full, collection]
         default: gaps
 permissions:
   contents: read
@@ -48,6 +48,8 @@ jobs:
             python3 source/probe.py
           elif [[ "$PROBE_SCOPE" == gaps ]]; then
             python3 source/probe.py --gaps-only
+          elif [[ "$PROBE_SCOPE" == collection ]]; then
+            python3 source/probe.py --collection-only
           else
             echo 'Unknown probe scope' >&2; exit 2
           fi
