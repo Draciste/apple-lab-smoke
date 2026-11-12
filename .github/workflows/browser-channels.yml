@@ -1,0 +1,51 @@
+name: Public browser channel collection
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apple-browser-channels
+  cancel-in-progress: false
+jobs:
+  channels:
+    if: github.event.repository.private == false && github.event.repository.visibility == 'public' && github.actor == 'Draciste'
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - name: Exact public source and native free ARM runner
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SERVER: ${{ github.server_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SERVER" == https://github.com && "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init source
+          git -C source remote add origin "https://github.com/$REPO.git"
+          git -C source fetch --depth=1 origin "$SHA"
+          git -C source checkout --detach FETCH_HEAD
+          [[ "$(git -C source rev-parse HEAD)" == "$SHA" ]]
+          df -h "$HOME"
+      - name: Official parallel channels and matching test engines
+        shell: bash
+        run: |
+          set -u
+          failed=0
+          root="$HOME/AppleLab/browser-channels"
+          mkdir -p "$root"
+          python3 source/browser-channels/mac-channels.py --manifest source/browser-channels/mac27.json --receipt "$root/INSTALLATION.json" || failed=1
+          python3 source/browser-channels/mac-engines.py --manifest source/browser-channels/mac27.json --node "$(command -v node)" || failed=1
+          sudo python3 source/browser-channels/install-safari-tp.py --manifest source/browser-channels/mac27.json --receipt "$root/SAFARI_TP.json" || failed=1
+          sudo /usr/bin/safaridriver --enable || failed=1
+          PLAYWRIGHT_BROWSERS_PATH="$root/pw-cache" node source/browser-channels/mac-smoke.mjs || failed=1
+          for name in INSTALLATION ENGINES SAFARI_TP SMOKE; do
+            if [[ -f "$root/$name.json" ]]; then
+              echo "BEGIN_CHANNEL_RECEIPT_$name"
+              cat "$root/$name.json"
+              echo
+              echo "END_CHANNEL_RECEIPT_$name"
+            fi
+          done
+          exit "$failed"

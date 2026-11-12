@@ -1,0 +1,166 @@
+{
+  "checkedAt": "2026-11-12T13:03:22.091835+00:00",
+  "platform": "mac-arm64",
+  "osMajor": 27,
+  "channels": [
+    {
+      "id": "chrome-stable",
+      "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+      "format": "dmg",
+      "app_name": "Google Chrome.app",
+      "team_id": "EQHXZ8M8AV",
+      "bundle_id": "com.google.Chrome",
+      "existing_system_app": "Google Chrome.app",
+      "version": "157.0.8103.51"
+    },
+    {
+      "id": "chrome-beta",
+      "url": "https://dl.google.com/chrome/mac/universal/beta/googlechromebeta.dmg",
+      "format": "dmg",
+      "app_name": "Google Chrome Beta.app",
+      "team_id": "EQHXZ8M8AV",
+      "bundle_id": "com.google.Chrome.beta"
+    },
+    {
+      "id": "chrome-dev",
+      "url": "https://dl.google.com/chrome/mac/universal/dev/googlechromedev.dmg",
+      "format": "dmg",
+      "app_name": "Google Chrome Dev.app",
+      "team_id": "EQHXZ8M8AV",
+      "bundle_id": "com.google.Chrome.dev"
+    },
+    {
+      "id": "chrome-canary",
+      "url": "https://dl.google.com/chrome/mac/universal/canary/googlechromecanary.dmg",
+      "format": "dmg",
+      "app_name": "Google Chrome Canary.app",
+      "team_id": "EQHXZ8M8AV",
+      "bundle_id": "com.google.Chrome.canary"
+    },
+    {
+      "id": "firefox-stable",
+      "url": "https://download.mozilla.org/?product=firefox-latest-ssl&os=osx&lang=en-US",
+      "format": "dmg",
+      "app_name": "Firefox.app",
+      "team_id": "43AQ936H96",
+      "bundle_id": "org.mozilla.firefox",
+      "existing_system_app": "Firefox.app",
+      "version": "160.0"
+    },
+    {
+      "id": "firefox-beta",
+      "url": "https://download.mozilla.org/?product=firefox-beta-latest-ssl&os=osx&lang=en-US",
+      "format": "dmg",
+      "app_name": "Firefox.app",
+      "team_id": "43AQ936H96",
+      "bundle_id": "org.mozilla.firefox"
+    },
+    {
+      "id": "firefox-developer",
+      "url": "https://download.mozilla.org/?product=firefox-devedition-latest-ssl&os=osx&lang=en-US",
+      "format": "dmg",
+      "app_name": "Firefox Developer Edition.app",
+      "team_id": "43AQ936H96",
+      "bundle_id": "org.mozilla.firefoxdeveloperedition"
+    },
+    {
+      "id": "firefox-nightly",
+      "url": "https://download.mozilla.org/?product=firefox-nightly-latest-ssl&os=osx&lang=en-US",
+      "format": "dmg",
+      "app_name": "Firefox Nightly.app",
+      "team_id": "43AQ936H96",
+      "bundle_id": "org.mozilla.nightly"
+    },
+    {
+      "id": "firefox-esr",
+      "url": "https://download.mozilla.org/?product=firefox-esr-latest-ssl&os=osx&lang=en-US",
+      "format": "dmg",
+      "app_name": "Firefox.app",
+      "team_id": "43AQ936H96",
+      "bundle_id": "org.mozilla.firefox"
+    },
+    {
+      "id": "edge-stable",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/03f15e1f-bb9b-485b-a3f6-2e99402cb9a0/MicrosoftEdge-157.0.4341.46.pkg",
+      "format": "pkg",
+      "app_name": "Microsoft Edge.app",
+      "team_id": "UBF8T346G9",
+      "bundle_id": "com.microsoft.edgemac",
+      "sha256": "71c48e8f6b559c52744771606c8bce4c30e9fab71692c563fdfa69b2ef3c8d20",
+      "version": "157.0.4341.46",
+      "existing_system_app": "Microsoft Edge.app"
+    },
+    {
+      "id": "edge-beta",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7c6ec666-3410-4b7b-b6d2-a951ec88639a/MicrosoftEdgeBeta-158.0.4370.16.pkg",
+      "format": "pkg",
+      "app_name": "Microsoft Edge Beta.app",
+      "team_id": "UBF8T346G9",
+      "bundle_id": "com.microsoft.edgemac.Beta",
+      "sha256": "bc9a531f780703bbb9f9b59de1f51797b7e9bce2e79213a5b46483eb40684e68",
+      "version": "158.0.4370.16"
+    },
+    {
+      "id": "edge-dev",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/8e469591-d5b5-4a67-8cef-d0da5408c606/MicrosoftEdgeDev-159.0.4393.0.pkg",
+      "format": "pkg",
+      "app_name": "Microsoft Edge Dev.app",
+      "team_id": "UBF8T346G9",
+      "bundle_id": "com.microsoft.edgemac.Dev",
+      "sha256": "b4a96f5ef7442793063d0acddf66f9ecadbda9214ee0443b298a4d38ef2bb19d",
+      "version": "159.0.4393.0"
+    },
+    {
+      "id": "edge-canary",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/286516f1-25ca-40de-8a61-4d46c2acfcae/MicrosoftEdgeCanary-159.0.4397.0.dmg",
+      "format": "dmg",
+      "app_name": "Microsoft Edge Canary.app",
+      "team_id": "UBF8T346G9",
+      "bundle_id": "com.microsoft.edgemac.Canary"
+    },
+    {
+      "id": "opera-stable",
+      "url": "https://get.geo.opera.com/pub/opera/desktop/140.0.6074.18/mac/Opera_140.0.6074.18_Setup.dmg",
+      "format": "dmg",
+      "app_name": "Opera.app",
+      "team_id": "A2P9LX4JPN",
+      "bundle_id": "com.operasoftware.Opera",
+      "existing_system_app": "Opera.app",
+      "version": "140.0.6074.18"
+    },
+    {
+      "id": "opera-developer",
+      "url": "https://get.geo.opera.com/pub/opera-developer/141.0.6079.0/mac/Opera_Developer_141.0.6079.0_Setup.dmg",
+      "format": "dmg",
+      "app_name": "Opera Developer.app",
+      "team_id": "A2P9LX4JPN",
+      "bundle_id": "com.operasoftware.OperaDeveloper"
+    }
+  ],
+  "safariTechnologyPreview": {
+    "url": "https://secure-appldnld.apple.com/STP/142-53583-20261104-3efa3282-5778-498f-bf15-a17269776fe0/SafariTechPreview256.dmg",
+    "method": "Native signed Apple package installer; separate from system Safari"
+  },
+  "cft": [
+    {
+      "channel": "Stable",
+      "version": "157.0.8103.78",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.78/mac-arm64/chrome-mac-arm64.zip"
+    },
+    {
+      "channel": "Beta",
+      "version": "158.0.8127.18",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.18/mac-arm64/chrome-mac-arm64.zip"
+    },
+    {
+      "channel": "Dev",
+      "version": "159.0.8144.0",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/159.0.8144.0/mac-arm64/chrome-mac-arm64.zip"
+    },
+    {
+      "channel": "Canary",
+      "version": "160.0.8156.0",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/160.0.8156.0/mac-arm64/chrome-mac-arm64.zip"
+    }
+  ]
+}
