@@ -11,11 +11,14 @@ if not url.startswith('https://secure-appldnld.apple.com/STP/'):raise RuntimeErr
 stage=Path(tempfile.mkdtemp(prefix='applelab-stp-'));mount=stage/'mount';mount.mkdir();mounted=False;safe=True
 try:
  archive=stage/'stp.dmg';m.download(url,archive)
+ digest=hashlib.sha256()
+ with archive.open('rb') as stream:
+  for chunk in iter(lambda:stream.read(1048576),b''):digest.update(chunk)
  subprocess.run(['/usr/bin/hdiutil','attach','-readonly','-nobrowse','-noautoopen','-mountpoint',str(mount),str(archive)],check=True,timeout=180);mounted=True
  packages=list(mount.glob('*.pkg'))
  if len(packages)!=1:raise RuntimeError('Review changed Apple package shape')
  pkg=packages[0];sig=subprocess.run(['/usr/sbin/pkgutil','--check-signature',str(pkg)],capture_output=True,text=True,check=True,timeout=120)
- if 'Apple' not in sig.stdout:raise RuntimeError('Expected trusted Apple installer identity')
+ if not __import__('re').search(r'(?m)^\s*1\.\s+Software Update(?:\s|$)',sig.stdout):raise RuntimeError('Expected Apple Software Update leaf signer')
  subprocess.run(['/usr/sbin/spctl','--assess','--type','install','--verbose=2',str(pkg)],check=True,timeout=180)
  subprocess.run(['/usr/sbin/installer','-pkg',str(pkg),'-target','/'],check=True,timeout=600)
  app=Path('/Applications/Safari Technology Preview.app');info=plistlib.loads((app/'Contents/Info.plist').read_bytes())
@@ -23,7 +26,7 @@ try:
  subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(app)],check=True,timeout=180)
  subprocess.run(['/usr/sbin/spctl','--assess','--type','execute',str(app)],check=True,timeout=180)
  driver=app/'Contents/MacOS/safaridriver';subprocess.run([str(driver),'--enable'],check=True,timeout=30)
- a.receipt.write_text(json.dumps({'state':'installed','url':url,'archiveSHA256':hashlib.file_digest(archive.open('rb'),'sha256').hexdigest(),'path':str(app),'version':info['CFBundleShortVersionString'],'signature':sig.stdout,'update':'Native Apple Software Update; Safari stable unchanged'},indent=2)+'\n')
+ a.receipt.write_text(json.dumps({'state':'installed','url':url,'archiveSHA256':digest.hexdigest(),'path':str(app),'version':info['CFBundleShortVersionString'],'signature':sig.stdout,'update':'Native Apple Software Update; Safari stable unchanged'},indent=2)+'\n')
 finally:
  if mounted:
   r=subprocess.run(['/usr/bin/hdiutil','detach',str(mount)],timeout=120);safe=r.returncode==0

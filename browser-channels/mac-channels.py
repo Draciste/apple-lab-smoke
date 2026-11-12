@@ -117,7 +117,7 @@ def validate(c):
     if "existing_system_app" in c:
         name = c["existing_system_app"]
         if (not isinstance(name, str) or Path(name).name != name or
-                not name.endswith(".app") or not c.get("version")):
+                not name.endswith(".app") or not (c.get("reuse_version") or c.get("version"))):
             raise ValueError("existing_system_app requires an app name and exact version")
     if "safari" in c["id"].lower() or "safari" in c["app_name"].lower():
         raise ValueError("Safari packages require separate supported system-installer review")
@@ -130,9 +130,9 @@ def install(c, root):
         if existing.exists():
             info = metadata(existing)
             if (info["bundle_id"] == c["bundle_id"] and
-                    str(info["version"]) == str(c["version"])):
+                    str(info["version"]) == str(c.get("reuse_version",c.get("version")))):
                 return {"state": "system_existing_verified", "path": str(existing),
-                        **inspect(existing, c)}
+                        **inspect(existing, {**c,"version":c.get("reuse_version",c.get("version"))})}
     target_dir = root / c["id"]
     target = target_dir / c["app_name"]
     if target.exists():
@@ -227,12 +227,14 @@ def main():
     failed = False
     for channel in channels:
         name = channel.get("id", "<missing>")
+        print(json.dumps({"channel":name,"state":"installing_or_reusing"}),flush=True)
         try:
             receipt["channels"][name] = install(channel, args.root)
         except Exception as e:
             failed = True
             receipt["channels"][name] = {"state": "failed", "error": str(e)}
         write_receipt(args.receipt, receipt)
+        print(json.dumps({"channel":name,**receipt["channels"][name]}),flush=True)
     return 1 if failed else 0
 
 

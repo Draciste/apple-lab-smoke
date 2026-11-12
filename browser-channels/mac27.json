@@ -11,7 +11,8 @@
       "team_id": "EQHXZ8M8AV",
       "bundle_id": "com.google.Chrome",
       "existing_system_app": "Google Chrome.app",
-      "version": "157.0.8103.51"
+      "reuse_version": "158.0.8127.18",
+      "versionMeaning": "Current signed dynamic download is observed, not a fixed-version artifact; reuse only when known current system version matches."
     },
     {
       "id": "chrome-beta",

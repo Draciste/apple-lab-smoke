@@ -4,6 +4,11 @@ import argparse,hashlib,json,os,plistlib,shutil,subprocess,tempfile,urllib.reque
 import importlib.util
 spec=importlib.util.spec_from_file_location('mac_channels',Path(__file__).with_name('mac-channels.py'));module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);download=module.download
 
+def sha256file(p):
+ h=hashlib.sha256()
+ with p.open('rb') as f:
+  for chunk in iter(lambda:f.read(1048576),b''):h.update(chunk)
+ return h.hexdigest()
 def run(args,timeout=600):return subprocess.run(args,check=True,timeout=timeout)
 ap=argparse.ArgumentParser();ap.add_argument('--manifest',type=Path,required=True);ap.add_argument('--node',required=True);args=ap.parse_args()
 manifest=json.loads(args.manifest.read_text());root=Path.home()/'AppleLab/browser-channels';root.mkdir(parents=True,exist_ok=True);results=[]
@@ -24,7 +29,7 @@ for channel in manifest['cft']:
   if info['CFBundleShortVersionString']!=channel['version']:raise RuntimeError('CfT metadata version mismatch')
   signature=subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(candidate)],capture_output=True,text=True,timeout=180)
   target.parent.mkdir(parents=True,exist_ok=True);os.rename(expanded,target)
-  results.append({**channel,'path':str(app),'state':'installed','archiveSHA256':hashlib.file_digest(archive.open('rb'),'sha256').hexdigest(),'signatureExit':signature.returncode,'signatureObservation':signature.stderr[-1000:],'trust':'Official manifest HTTPS distribution and recorded archive hash; no valid publisher signature claim or security bypass'})
+  results.append({**channel,'path':str(app),'state':'installed','archiveSHA256':sha256file(archive),'signatureExit':signature.returncode,'signatureObservation':signature.stderr[-1000:],'trust':'Official manifest HTTPS distribution and recorded archive hash; no valid publisher signature claim or security bypass'})
  finally:shutil.rmtree(stage)
 automation=root/'automation';automation.mkdir(exist_ok=True)
 package=automation/'package.json'
