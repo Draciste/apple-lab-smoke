@@ -4,7 +4,7 @@ on:
     inputs:
       scope:
         type: choice
-        options: [all, repairs, safari-pixel]
+        options: [all, repairs, safari-pixel, safari-readback]
         default: all
 permissions:
   contents: read
@@ -42,7 +42,8 @@ jobs:
           failed=0
           root="$HOME/AppleLab/browser-channels"
           mkdir -p "$root"
-          if [[ "$CHANNEL_SCOPE" == safari-pixel ]]; then
+          if [[ "$CHANNEL_SCOPE" == safari-pixel || "$CHANNEL_SCOPE" == safari-readback ]]; then
+            if [[ "$CHANNEL_SCOPE" == safari-readback ]]; then export APPLELAB_CANVAS_READBACK_HINT=1; fi
             mkdir -p "$root/automation"
             printf '%s' '{"name":"applelab-browser-engines","private":true}' > "$root/automation/package.json"
             (cd "$root/automation" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --ignore-scripts --no-audit --no-fund --save-exact playwright@1.65.0) || failed=1
