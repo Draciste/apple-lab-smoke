@@ -1,0 +1,67 @@
+# Manual public standard runner; private source/results are authenticated ciphertext.
+name: ARM qualification
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Explicit selected scope
+        type: choice
+        options: [all, current, extended, baseline, probe]
+        default: all
+      fromSuite:
+        description: Optional starting live suite
+        type: choice
+        options: [none, community030, rich040, repair041, audit021, documented-api, mining, scope022, ubo023, vnext]
+        default: none
+      includeUnit:
+        description: Run unit tests
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: devaiaye-arm-qualification
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: ${{ github.event.repository.private == false && github.event.repository.visibility == 'public' && github.ref == 'refs/heads/main' && github.actor == 'Draciste' }}
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - name: Fetch reviewed commit
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          git init -q source
+          git -C source remote add origin "https://github.com/$REPO.git"
+          git -C source fetch -q --depth=1 origin "$SHA"
+          git -C source checkout -q --detach FETCH_HEAD
+          [[ "$(git -C source rev-parse HEAD)" == "$SHA" ]]
+      - name: Qualification and seal
+        env:
+          ARM_MODE: ${{ inputs.mode }}
+          ARM_FROM_SUITE: ${{ inputs.fromSuite }}
+          ARM_INCLUDE_UNIT: ${{ inputs.includeUnit }}
+          ARM_SOURCE_KEY: ${{ secrets.DEVAIAYE_ARM_SOURCE_KEY }}
+          ARM_RESULT_KEY: ${{ secrets.DEVAIAYE_ARM_RESULT_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 source/arm-ci/runner.py
+      - name: Export encrypted result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: encrypted-result
+          path: ${{ runner.temp }}/result.enc
+          if-no-files-found: error
+          retention-days: 1
+
+
+
