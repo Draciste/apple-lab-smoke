@@ -1,0 +1,69 @@
+name: ARM64 public browser probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    if: github.repository == 'Draciste/only-random-tests-please-ignore-this-apple-lab-smoke' && github.event.repository.private == false && github.actor == 'Draciste' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04-arm, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 exact reviewed upstream ref
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6 exact reviewed upstream ref
+        with:
+          node-version: '26.13.0'
+          architecture: arm64
+          package-manager-cache: false
+      - name: Install Chrome on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --proto '=https' -o "$RUNNER_TEMP/google-key.pub" https://dl.google.com/linux/linux_signing_key.pub
+          gpg --batch --yes --dearmor -o "$RUNNER_TEMP/google.gpg" "$RUNNER_TEMP/google-key.pub"
+          sudo install -m644 "$RUNNER_TEMP/google.gpg" /usr/share/keyrings/devaiaye-google.gpg
+          echo 'deb [arch=arm64 signed-by=/usr/share/keyrings/devaiaye-google.gpg] https://dl.google.com/linux/chrome/deb/ stable main' | sudo tee /etc/apt/sources.list.d/devaiaye-google.list
+          sudo apt-get update -qq
+          sudo apt-get install -y google-chrome-stable
+          echo 'CHROME_PATH=/opt/google/chrome/chrome' >> "$GITHUB_ENV"
+          uname -smr
+          cat /etc/os-release
+          file /opt/google/chrome/chrome | tee "$RUNNER_TEMP/chrome-file.txt"
+          grep -Eq "ELF 64-bit.*(ARM aarch64|ARM64)" "$RUNNER_TEMP/chrome-file.txt"
+          lspci -nnk | sed -n '/VGA compatible controller/,+4p;/3D controller/,+4p;/Display controller/,+4p' || true
+      - name: Locate native Chrome and inventory on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Join-Path ${env:ProgramFiles} 'Google\Chrome\Application\chrome.exe'
+          function Test-Arm64PE([string]$path) {
+            if (-not (Test-Path -LiteralPath $path)) { return $false }
+            $s = [IO.File]::OpenRead($path)
+            try { $b = [IO.BinaryReader]::new($s); $s.Position = 0x3c; $offset = $b.ReadInt32(); $s.Position = $offset; return ($b.ReadUInt32() -eq 0x4550 -and $b.ReadUInt16() -eq 0xAA64) } finally { $s.Dispose() }
+          }
+          if (-not (Test-Arm64PE $p)) {
+            $msi = Join-Path $env:RUNNER_TEMP 'chrome-arm64.msi'
+            Invoke-WebRequest -Uri 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi' -OutFile $msi
+            $sig = Get-AuthenticodeSignature -LiteralPath $msi
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|,\s*)O=Google LLC(,|$)') { throw 'Google installer signature validation failed' }
+            $proc = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList @('/i', $msi, '/qn', '/norestart') -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "Chrome installer failed: $($proc.ExitCode)" }
+          }
+          if (-not (Test-Arm64PE $p)) { throw 'Installed Chrome executable is missing or not ARM64' }
+          (Get-Item -LiteralPath $p).VersionInfo.ProductVersion
+          "CHROME_PATH=$p" >> $env:GITHUB_ENV
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List
+          Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,PNPDeviceID | Format-List
+      - name: Probe native Node and browser
+        shell: pwsh
+        run: node arm-browser-probe.mjs
+
+
