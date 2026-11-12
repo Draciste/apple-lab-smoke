@@ -4,7 +4,7 @@ on:
     inputs:
       scope:
         type: choice
-        options: [all, repairs]
+        options: [all, repairs, safari-pixel]
         default: all
 permissions:
   contents: read
@@ -42,7 +42,14 @@ jobs:
           failed=0
           root="$HOME/AppleLab/browser-channels"
           mkdir -p "$root"
-          if [[ "$CHANNEL_SCOPE" == repairs ]]; then
+          if [[ "$CHANNEL_SCOPE" == safari-pixel ]]; then
+            mkdir -p "$root/automation"
+            printf '%s' '{"name":"applelab-browser-engines","private":true}' > "$root/automation/package.json"
+            (cd "$root/automation" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --ignore-scripts --no-audit --no-fund --save-exact playwright@1.65.0) || failed=1
+            printf '%s' '{"channels":{},"expected_channels":[]}' > "$root/INSTALLATION.json"
+            printf '%s' '{"cft":[],"scope":"Targeted Safari canvas fixture repair only"}' > "$root/ENGINES.json"
+            export APPLELAB_CHANNEL_FILTER=safari
+          elif [[ "$CHANNEL_SCOPE" == repairs ]]; then
             python3 -c 'import json;from pathlib import Path;p=Path("source/browser-channels/mac27.json");r=json.loads(p.read_text());r["channels"]=[c for c in r["channels"] if c["id"].startswith("firefox-") or c["id"]=="opera-stable"];Path("repair-manifest.json").write_text(json.dumps(r))'
             python3 source/browser-channels/mac-channels.py --manifest repair-manifest.json --receipt "$root/INSTALLATION.json" || failed=1
             mkdir -p "$root/automation"
