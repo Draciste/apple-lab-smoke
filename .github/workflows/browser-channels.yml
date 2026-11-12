@@ -1,6 +1,11 @@
 name: Public browser channel collection
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        type: choice
+        options: [all, repairs]
+        default: all
 permissions:
   contents: read
 concurrency:
@@ -29,15 +34,29 @@ jobs:
           [[ "$(git -C source rev-parse HEAD)" == "$SHA" ]]
           df -h "$HOME"
       - name: Official parallel channels and matching test engines
+        env:
+          CHANNEL_SCOPE: ${{ inputs.scope }}
         shell: bash
         run: |
           set -u
           failed=0
           root="$HOME/AppleLab/browser-channels"
           mkdir -p "$root"
-          python3 source/browser-channels/mac-channels.py --manifest source/browser-channels/mac27.json --receipt "$root/INSTALLATION.json" || failed=1
-          python3 source/browser-channels/mac-engines.py --manifest source/browser-channels/mac27.json --node "$(command -v node)" || failed=1
-          sudo python3 source/browser-channels/install-safari-tp.py --manifest source/browser-channels/mac27.json --receipt "$root/SAFARI_TP.json" || failed=1
+          if [[ "$CHANNEL_SCOPE" == repairs ]]; then
+            python3 -c 'import json;from pathlib import Path;p=Path("source/browser-channels/mac27.json");r=json.loads(p.read_text());r["channels"]=[c for c in r["channels"] if c["id"].startswith("firefox-") or c["id"]=="opera-stable"];Path("repair-manifest.json").write_text(json.dumps(r))'
+            python3 source/browser-channels/mac-channels.py --manifest repair-manifest.json --receipt "$root/INSTALLATION.json" || failed=1
+            mkdir -p "$root/automation"
+            printf '%s' '{"name":"applelab-browser-engines","private":true}' > "$root/automation/package.json"
+            (cd "$root/automation" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --ignore-scripts --no-audit --no-fund --save-exact playwright@1.65.0) || failed=1
+            printf '%s' '{"cft":[],"scope":"Targeted seven-case repair; no complete engine collection asserted"}' > "$root/ENGINES.json"
+            export APPLELAB_CHANNEL_FILTER=firefox-stable,firefox-beta,firefox-developer,firefox-nightly,firefox-esr,opera-stable,safari
+          elif [[ "$CHANNEL_SCOPE" == all ]]; then
+            python3 source/browser-channels/mac-channels.py --manifest source/browser-channels/mac27.json --receipt "$root/INSTALLATION.json" || failed=1
+            python3 source/browser-channels/mac-engines.py --manifest source/browser-channels/mac27.json --node "$(command -v node)" || failed=1
+            sudo python3 source/browser-channels/install-safari-tp.py --manifest source/browser-channels/mac27.json --receipt "$root/SAFARI_TP.json" || failed=1
+          else
+            echo 'Unknown scope' >&2; exit 2
+          fi
           sudo /usr/bin/safaridriver --enable || failed=1
           PLAYWRIGHT_BROWSERS_PATH="$root/pw-cache" node source/browser-channels/mac-smoke.mjs || failed=1
           for name in INSTALLATION ENGINES SAFARI_TP SMOKE; do

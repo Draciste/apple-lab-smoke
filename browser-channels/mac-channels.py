@@ -218,7 +218,7 @@ def main():
     if len(ids) != len(set(ids)):
         ap.error("duplicate channel ids")
     args.root.mkdir(parents=True, exist_ok=True)
-    receipt = {"system_inventory": {}, "channels": {}}
+    receipt = {"expected_channels":ids,"system_inventory": {}, "channels": {}}
     for name in SYSTEM_APPS:
         path = Path('/Applications') / name
         try:

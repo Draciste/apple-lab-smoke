@@ -127,7 +127,8 @@
       "team_id": "A2P9LX4JPN",
       "bundle_id": "com.operasoftware.Opera",
       "existing_system_app": "Opera.app",
-      "version": "140.0.6074.18"
+      "artifactVersion": "140.0.6074.18",
+      "reuse_version": "140.0"
     },
     {
       "id": "opera-developer",
