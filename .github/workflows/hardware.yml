@@ -1,0 +1,27 @@
+name: Synthetic Apple hardware audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: ${{ github.event.repository.private == false && github.event.repository.visibility == 'public' && github.ref == 'refs/heads/main' && github.actor == 'Draciste' }}
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - name: Fetch exact reviewed commit and run synthetic probe
+        env:
+          AUDIT_REPOSITORY: ${{ github.repository }}
+          AUDIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$AUDIT_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$AUDIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          git init -q source
+          git -C source remote add origin "https://github.com/$AUDIT_REPOSITORY.git"
+          git -C source fetch -q --depth=1 origin "$AUDIT_SHA"
+          git -C source checkout -q --detach FETCH_HEAD
+          [[ "$(git -C source rev-parse HEAD)" == "$AUDIT_SHA" ]]
+          python3 source/hardware-audit/apple-hardware.py
