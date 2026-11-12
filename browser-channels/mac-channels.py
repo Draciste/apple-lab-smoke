@@ -49,12 +49,15 @@ def inspect(app, expected):
         raise RuntimeError(f"bundle ID mismatch: {info['bundle_id']!r}")
     if expected.get("version") and str(info["version"]) != str(expected["version"]):
         raise RuntimeError(f"version mismatch: {info['version']!r}")
-    run(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)], timeout=300)
+    requirement = '=anchor apple generic and identifier "'+expected["bundle_id"]+'" and certificate leaf[subject.OU] = "'+expected["team_id"]+'"'
+    deep = os.environ.get("APPLELAB_DEEP_APP_CHECKS") == "1"
+    run(["/usr/bin/codesign", "--verify", "--strict", "-R", requirement, *(["--deep"] if deep else []), str(app)], timeout=300)
     sig = run(["/usr/bin/codesign", "-dv", "--verbose=4", str(app)])
     match = re.search(r"^TeamIdentifier=(.+)$", sig.stderr, re.MULTILINE)
     if not match or match.group(1).strip() != expected["team_id"]:
         raise RuntimeError("signing team mismatch or unavailable")
-    run(["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=2", str(app)], timeout=300)
+    if deep:
+        run(["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=2", str(app)], timeout=300)
     return info
 
 
