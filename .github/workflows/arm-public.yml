@@ -56,16 +56,26 @@ jobs:
             $s = [IO.File]::OpenRead($path)
             try { $b = [IO.BinaryReader]::new($s); $s.Position = 0x3c; $offset = $b.ReadInt32(); $s.Position = $offset; return ($b.ReadUInt32() -eq 0x4550 -and $b.ReadUInt16() -eq 0xAA64) } finally { $s.Dispose() }
           }
-          if (-not (Test-Arm64PE $p)) {
-            $msi = Join-Path $env:RUNNER_TEMP 'chrome-arm64.msi'
-            Invoke-WebRequest -Uri 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi' -OutFile $msi
-            $sig = Get-AuthenticodeSignature -LiteralPath $msi
-            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|,\s*)O=Google LLC(,|$)') { throw 'Google installer signature validation failed' }
-            $proc = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList @('/i', $msi, '/qn', '/norestart') -Wait -PassThru
-            if ($proc.ExitCode -ne 0) { throw "Chrome installer failed: $($proc.ExitCode)" }
+          $msi = Join-Path $env:RUNNER_TEMP 'chrome-arm64.msi'
+          Invoke-WebRequest -Uri 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi' -OutFile $msi
+          $sig = Get-AuthenticodeSignature -LiteralPath $msi
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|,\s*)O=Google LLC(,|$)') { throw 'Google installer signature validation failed' }
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.OpenDatabase($msi, 0)
+          $view = $db.OpenView('SELECT * FROM Property')
+          $view.Execute()
+          $msiVersion = $null
+          while ($record = $view.Fetch()) {
+            if ($record.StringData(1) -eq 'ProductVersion') { $msiVersion = [version]$record.StringData(2); break }
           }
+          $view.Close()
+          if ($null -eq $msiVersion) { throw 'MSI ProductVersion missing' }
+          $proc = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList @('/i', $msi, '/qn', '/norestart') -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Chrome installer failed: $($proc.ExitCode)" }
           if (-not (Test-Arm64PE $p)) { throw 'Installed Chrome executable is missing or not ARM64' }
-          (Get-Item -LiteralPath $p).VersionInfo.ProductVersion
+          $chromeVersion = [version](Get-Item -LiteralPath $p).VersionInfo.ProductVersion
+          if ($chromeVersion -lt $msiVersion) { throw "Installed Chrome $chromeVersion is older than MSI $msiVersion" }
+          "MSI ProductVersion=$msiVersion; installed Chrome=$chromeVersion"
           "CHROME_PATH=$p" >> $env:GITHUB_ENV
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List
           Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,PNPDeviceID | Format-List
