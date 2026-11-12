@@ -6,7 +6,7 @@ on:
       mode:
         description: Explicit selected scope
         type: choice
-        options: [all, current, extended, baseline, probe]
+        options: [all, current, extended, baseline, probe, media, settings, pdf, unified-pdf, baseline-export]
         default: all
       fromSuite:
         description: Optional starting live suite

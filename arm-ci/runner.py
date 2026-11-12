@@ -18,7 +18,7 @@ from_suite=os.environ.pop('ARM_FROM_SUITE', '')
 include_unit=os.environ.pop('ARM_INCLUDE_UNIT', '')
 current={'community030','rich040','repair041'}
 extended={'audit021','documented-api','mining','scope022','ubo023','vnext'}
-if mode not in {'all','current','extended','baseline','probe'} or include_unit not in {'true','false'}:
+if mode not in {'all','current','extended','baseline','probe','media','settings','pdf','unified-pdf','baseline-export'} or include_unit not in {'true','false'}:
     raise SystemExit('state=incomplete')
 allowed=(current|extended) if mode=='all' else current if mode=='current' else extended if mode=='extended' else set()
 if from_suite!='none' and from_suite not in allowed:
@@ -73,7 +73,9 @@ def collect_baseline(root,evidence):
         if not record.exists(): continue
         if record.is_symlink() or not record.is_file(): raise ValueError('unexpected result record')
         value=json.loads(record.read_text()); directory=pathlib.Path(value['directory']).resolve()
-        if directory.parent!=tests or not directory.is_dir(): raise ValueError('result directory outside tests')
+        peer_parent=(root/'research/2026-11-08-peer-audit-repairs').resolve()
+        allowed=(directory.parent==tests and directory.name.startswith('unified-live-')) if name=='UNIFIED_RUN.json' else (directory.parent==peer_parent and re.fullmatch(r'live-[0-9]+',directory.name))
+        if not allowed or not directory.is_dir(): raise ValueError('result directory outside its owned fixture root')
         for item in directory.rglob('*'):
             if item.is_symlink() or (not item.is_file() and not item.is_dir()): raise ValueError('unexpected evidence type')
         shutil.copytree(directory,dest/directory.name)
@@ -112,6 +114,10 @@ try:
     run(['lipo','-verify_arch','arm64',ffmpeg]); run(['lipo','-verify_arch','arm64',ffprobe]); run([ffmpeg,'-version']); run([ffprobe,'-version'])
     (evidence/'media-tools.json').write_text(json.dumps({'ffmpeg':str(ffmpeg),'ffprobe':str(ffprobe),'ffmpeg_sha256':digest(ffmpeg),'ffprobe_sha256':digest(ffprobe),'scope':'runner image or official Homebrew; see private log for versions'}))
     (root/'runtime/media-tools.local.json').write_text(json.dumps({'platform':'darwin-arm64','ffmpeg':str(ffmpeg),'ffprobe':str(ffprobe),'source':'runner image or official Homebrew'}))
+    if mode in {'all','baseline','media','baseline-export'} and not shutil.which('avifenc'):
+        brew=shutil.which('brew')
+        if not brew: raise ValueError('Native AVIF generator unavailable')
+        run([brew,'install','libavif'],timeout=1200)
     env=dict(os.environ,PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD='1',PATH=str(ffmpeg.parent)+os.pathsep+str(ffprobe.parent)+os.pathsep+os.environ.get('PATH',''))
     for sub in ('runtime','tests/vendor'): run(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],cwd=root/sub,env=env)
     pwenv=dict(env); pwenv.pop('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD',None)

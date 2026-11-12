@@ -1,6 +1,6 @@
 {
-  "source_tar_sha256": "0bd52652032a905fef7b42d02d4e3d4bc6fa8966cf47dccde76648ae36004418",
-  "ciphertext_sha256": "9dbea10ecb1f19e453f7c43bcbfa546fa0c95ffa5ef4ff40126e3aae31d8d369",
+  "source_tar_sha256": "19c53235cb48a10214393c28dc0ce9ec435855da7ef927faa517d4dd779c00e3",
+  "ciphertext_sha256": "f74f8d9d1850c4a0375485e7e4fccacd6e0e937c2a9830a9bf249ebbfa770667",
   "cft_url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.50/mac-arm64/chrome-mac-arm64.zip",
   "cft_sha256": ""
 }
