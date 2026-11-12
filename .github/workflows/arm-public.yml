@@ -1,6 +1,13 @@
 name: ARM64 public browser probe
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Runners to execute
+        required: true
+        type: choice
+        default: both
+        options: [both, windows]
 permissions:
   contents: read
 jobs:
@@ -9,9 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-26.04-arm, windows-11-arm]
+        runner: ${{ fromJSON(inputs.runner == 'windows' && '["windows-11-arm"]' || '["ubuntu-26.04-arm","windows-11-arm"]') }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 exact reviewed upstream ref
         with:
@@ -62,6 +69,15 @@ jobs:
           "CHROME_PATH=$p" >> $env:GITHUB_ENV
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List
           Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,PNPDeviceID | Format-List
+      - name: Install Playwright without browser downloads or install scripts
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'arm-playwright'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
+          npm install --prefix $dir --ignore-scripts --no-audit --no-fund playwright@1.65.0
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed: $LASTEXITCODE" }
+          "PW_LAB_REQUIRE=$dir/index.cjs" >> $env:GITHUB_ENV
       - name: Probe native Node and browser
         shell: pwsh
         run: node arm-browser-probe.mjs
