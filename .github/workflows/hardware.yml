@@ -9,6 +9,14 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 15
     steps:
+      - name: Prepare native media tools in this ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            brew install --formula ffmpeg
+          fi
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: Fetch exact reviewed commit and run synthetic probe
         env:
           AUDIT_REPOSITORY: ${{ github.repository }}
