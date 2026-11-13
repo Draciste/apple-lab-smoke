@@ -18,7 +18,7 @@ from_suite=os.environ.pop('ARM_FROM_SUITE', '')
 include_unit=os.environ.pop('ARM_INCLUDE_UNIT', '')
 current={'community030','rich040','repair041'}
 extended={'audit021','documented-api','mining','scope022','ubo023','vnext'}
-if mode not in {'all','current','extended','baseline','probe','media','settings','pdf','unified-pdf','baseline-export'} or include_unit not in {'true','false'}:
+if mode != 'current' or from_suite != 'none' or include_unit != 'false':
     raise SystemExit('state=incomplete')
 allowed=(current|extended) if mode=='all' else current if mode=='current' else extended if mode=='extended' else set()
 if from_suite!='none' and from_suite not in allowed:
@@ -102,32 +102,18 @@ try:
             result=subprocess.run(args,stdout=f,stderr=subprocess.STDOUT,timeout=90)
             f.write(('signature-check-exit='+str(result.returncode)+'\n').encode())
     chrome=app/'Contents/MacOS/Google Chrome for Testing'
-    # Prefer the image native tools; if absent use official Homebrew formula.
-    ffmpeg=shutil.which('ffmpeg'); ffprobe=shutil.which('ffprobe')
-    if not ffmpeg or not ffprobe:
-        brew=shutil.which('brew')
-        if not brew: raise ValueError('native media tools and Homebrew unavailable')
-        run([brew,'install','ffmpeg'],timeout=1800)
-        ffmpeg=shutil.which('ffmpeg'); ffprobe=shutil.which('ffprobe')
-    if not ffmpeg or not ffprobe: raise ValueError('native media tools unavailable')
-    ffmpeg=pathlib.Path(ffmpeg).resolve(); ffprobe=pathlib.Path(ffprobe).resolve()
-    run(['lipo','-verify_arch','arm64',ffmpeg]); run(['lipo','-verify_arch','arm64',ffprobe]); run([ffmpeg,'-version']); run([ffprobe,'-version'])
-    (evidence/'media-tools.json').write_text(json.dumps({'ffmpeg':str(ffmpeg),'ffprobe':str(ffprobe),'ffmpeg_sha256':digest(ffmpeg),'ffprobe_sha256':digest(ffprobe),'scope':'runner image or official Homebrew; see private log for versions'}))
-    (root/'runtime/media-tools.local.json').write_text(json.dumps({'platform':'darwin-arm64','ffmpeg':str(ffmpeg),'ffprobe':str(ffprobe),'source':'runner image or official Homebrew'}))
-    if mode in {'all','baseline','media','baseline-export'} and not shutil.which('avifenc'):
-        brew=shutil.which('brew')
-        if not brew: raise ValueError('Native AVIF generator unavailable')
-        run([brew,'install','libavif'],timeout=1200)
-    env=dict(os.environ,PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD='1',PATH=str(ffmpeg.parent)+os.pathsep+str(ffprobe.parent)+os.pathsep+os.environ.get('PATH',''))
+    # release055 does not require media generators or Playwright's recording helper.
+    # Never upgrade or install OS packages for this focused runner.
+    env=dict(os.environ,PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD='1')
     for sub in ('runtime','tests/vendor'): run(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],cwd=root/sub,env=env)
-    pwenv=dict(env); pwenv.pop('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD',None)
-    run(['node',root/'runtime/node_modules/playwright/cli.js','install','ffmpeg'],cwd=root,env=pwenv)
     env.update(DEVAIAYE_ROOT=str(root),LAB_EXTENSION=str(root/'extension'),LAB_CFT=str(chrome),DEVAIAYE_LAB_EVIDENCE=str(evidence),DEVAIAYE_LAB_MODE=mode,DEVAIAYE_LAB_INCLUDE_UNIT=('1' if include_unit=='true' else '0'))
     if from_suite!='none': env['DEVAIAYE_LAB_FROM_SUITE']=from_suite
     else: env.pop('DEVAIAYE_LAB_FROM_SUITE',None)
     run(['node',root/'apple/mac042-entry.mjs'],cwd=root,env=env,timeout=3300)
     result=json.loads((evidence/'apple-entry.json').read_text())
     if result.get('state')!='passed' or not result.get('chromeClosed') or not result.get('privateStateRemoved'): raise ValueError('qualification or cleanup incomplete')
+    portable=result.get('portable',{}); cases=portable.get('cases',[])
+    if not portable.get('passed') or len(cases)!=1 or cases[0].get('name')!='release055' or cases[0].get('state')!='passed': raise ValueError('release055 selection incomplete')
     state='passed'
 except Exception:
     with log.open('a',encoding='utf8') as f: traceback.print_exc(file=f)
