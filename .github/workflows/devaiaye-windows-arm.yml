@@ -54,14 +54,6 @@ jobs:
           "CHROME_PATH=$p" >> $env:GITHUB_ENV
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List
           Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,PNPDeviceID | Format-List
-      - name: Fetch pinned FFmpeg helper archive
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $file = Join-Path $env:RUNNER_TEMP 'devaiaye-ffmpeg.zip'
-          Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip' -OutFile $file
-          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
-          if ($actual -ne '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba') { throw 'FFmpeg helper archive digest mismatch' }
       - name: Run private qualification
         id: qualification
         shell: pwsh

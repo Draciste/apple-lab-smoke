@@ -81,8 +81,7 @@ try:
  stage='decrypt-source';tar=work/'source.tar';seal('open',blob,tar,source_key);source_key=''
  if digest(tar)!=cfg['source_tar_sha256']:raise ValueError('source digest mismatch')
  stage='extract-source';root=work/'source';root.mkdir();extract(tar,root);tar.unlink()
- stage='media-helper';media=prepare_media(root)
- env=environment({'CHROME_PATH':os.environ['CHROME_PATH'],'LAB_PRODUCT_ROOT':str(root),'LAB_EVIDENCE':str(evidence),'TEMP':str(work),'TMP':str(work),'PATH':str(media)+os.pathsep+os.environ.get('PATH','')})
+ env=environment({'CHROME_PATH':os.environ['CHROME_PATH'],'LAB_PRODUCT_ROOT':str(root),'LAB_EVIDENCE':str(evidence),'TEMP':str(work),'TMP':str(work)})
  node=pathlib.Path(shutil.which('node') or '')
  npm=node.parent/'node_modules'/'npm'/'bin'/'npm-cli.js'
  if not node.is_file() or not npm.is_file():raise ValueError('Node/npm unavailable')
@@ -91,6 +90,8 @@ try:
  stage='product-entry';run(['node',root/'windows-entry.mjs'],cwd=root,env=env,timeout=2700)
  stage='verify-entry';entry=json.loads((evidence/'windows-entry.json').read_text(encoding='utf-8'))
  if entry.get('state')!='selected-tests-completed-sandbox-review-required':raise ValueError('selected tests incomplete')
+ portable=entry.get('phases',{}).get('release055',{});cases=portable.get('cases',[])
+ if not portable.get('passed') or len(cases)!=1 or cases[0].get('name')!='release055' or cases[0].get('expected')!=8 or cases[0].get('observed')!=8 or cases[0].get('state')!='passed':raise ValueError('selected tests incomplete')
  state='review-required'
 except Exception as e:
  # Fixed stage and exception class are always safe. Child output may contain a
