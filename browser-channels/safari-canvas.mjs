@@ -15,7 +15,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));
 const driver=spawn('/usr/bin/safaridriver',['--diagnose','--port',String(port)],{stdio:['ignore','ignore','pipe']});let errors='';driver.stderr.on('data',b=>errors=(errors+b).slice(-4000));driver.on('error',e=>{errors+=String(e);});
 let session;
-async function rpc(p,data,method){const r=await fetch('http://127.0.0.1:'+port+p,{method:method??(data?'POST':'GET'),...(data?{body:JSON.stringify(data),headers:{'Content-Type':'application/json'}}:{}),signal:AbortSignal.timeout(90000)});const j=await r.json();if(j.value?.error)throw Error(JSON.stringify(j.value));return j.value;}
+async function rpc(p,data,method){const r=await fetch('http://127.0.0.1:'+port+p,{method:method??(data?'POST':'GET'),...(data?{body:JSON.stringify(data),headers:{'Content-Type':'application/json'}}:{}),signal:AbortSignal.timeout(90000)});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j.value));return j.value;}
 try{
  let ready=false;for(let i=0;i<40;i++){try{await rpc('/status');ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}}if(!ready)throw Error('Driver unavailable: '+errors);
  const s=await rpc('/session',{capabilities:{alwaysMatch:{browserName:'safari'}}});session=s.sessionId;result.capabilities=s.capabilities;
