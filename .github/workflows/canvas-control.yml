@@ -1,0 +1,36 @@
+name: Public Safari canvas control
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apple-browser-channels
+  cancel-in-progress: false
+jobs:
+  canvas:
+    if: github.event.repository.private == false && github.event.repository.visibility == 'public' && github.actor == 'Draciste'
+    runs-on: xcode-27
+    timeout-minutes: 12
+    steps:
+      - name: Owned public synthetic canvas and native Safari
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          [[ "$REPO" == Draciste/only-random-tests-please-ignore-this-apple-lab-smoke && "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init source
+          git -C source remote add origin "https://github.com/$REPO.git"
+          git -C source fetch --depth=1 origin "$SHA"
+          git -C source checkout --detach FETCH_HEAD
+          [[ "$(git -C source rev-parse HEAD)" == "$SHA" ]]
+          root="$HOME/AppleLab/browser-channels"
+          mkdir -p "$root/automation"
+          printf '%s' '{"name":"canvas-control","private":true}' > "$root/automation/package.json"
+          (cd "$root/automation" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --ignore-scripts --no-audit --no-fund --save-exact playwright@1.65.0)
+          system_profiler SPDisplaysDataType
+          /usr/bin/safaridriver --version
+          sudo /usr/bin/safaridriver --enable
+          node source/browser-channels/safari-canvas.mjs
